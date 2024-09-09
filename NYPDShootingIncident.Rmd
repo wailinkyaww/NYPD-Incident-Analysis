@@ -1,0 +1,176 @@
+---
+title: "NYPD Shooting Incident - Analysis Report"
+author: "Wai Lin Kyaw"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+The dataset contains all the shooting incidents that occurred in NYC from 1st Jan of 2006 all the way to end of 2022. The dataset is published by the New York Police Department and it is still being updated regularly.
+
+Each record contains followings:
+
+- Date & time of the incident occurred
+- Location of the incident
+- Area/City where the incident occurred
+- Victim information
+- Perpetrator information
+
+We will explore and analyse the all the aspects except the location.
+
+```{r, echo=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(conflicted)
+  library(ggplot2)
+  library(lubridate)
+})
+```
+
+## Importing dataset 
+
+Dataset is already downloaded in the workspace. 
+We will import the dataset and do basic inspection.
+```{r, echo=FALSE, message=FALSE}
+dataset_url <- './NYPD-Shooting-Incident.csv'
+
+incidents <- read_csv(dataset_url)
+```
+
+```{r, echo=FALSE, message=FALSE}
+n_samples <- nrow(incidents)
+n_variables <- ncol(incidents)
+variables <- colnames(incidents)
+
+cat("Number of samples:", n_samples)
+cat("Number of variables:", n_variables)
+cat("Variables:")
+variables
+```
+
+## Wrangling & cleaning dataset
+
+We have about 21 variables here.
+We can get rid of the ones that we don't really need so that we can focus on what's important.
+
+First, let's remove the variables related to location of the incident. 
+We will keep `LOC_OF_OCCUR_DESC`.
+
+```{r, message=FALSE}
+incidents <- incidents %>%
+  select(-c("INCIDENT_KEY",
+           "PRECINCT", 
+           "JURISDICTION_CODE", 
+           "LOC_CLASSFCTN_DESC",
+           "LOCATION_DESC",
+           "X_COORD_CD",
+           "Y_COORD_CD",
+           "Latitude",
+           "Longitude",
+           "Lon_Lat"
+           ))
+```
+
+We are left with the tibble of 11 variables. It is a good time to transform the data to more relevant data types. We can typecast followings into factor (categorical value).
+
+- boro (renaming this to borough)
+- location description
+- age group
+- sex
+- race
+
+```{r, echo=FALSE, message=FALSE}
+incidents <- incidents %>%
+  rename(BOROUGH = BORO) %>%
+  mutate(across(
+      c(BOROUGH, 
+        LOC_OF_OCCUR_DESC, 
+        PERP_AGE_GROUP, 
+        PERP_RACE, 
+        PERP_SEX, 
+        VIC_AGE_GROUP, 
+        VIC_RACE, 
+        VIC_SEX),
+      factor)
+  )
+```
+
+After we typecast, we can inspect the dataset to observe NA and null values.
+```{r, message=FALSE}
+na_cols <- colSums(is.na(incidents) | is.null(incidents))
+na_cols[na_cols > 0]
+```
+
+As we can see, above 4 variables have a lot of missing values. It's important to impute these with appropriate values so that, when we do the analysis, it will have proper meaning and easy to interpret.
+
+We replace those `NA` values with `Unknown`.
+And we will remove the columns where more than 75% of the rows have `NA`.
+
+```{r, echo=FALSE, message=FALSE}
+# This will remove the location of the occurrence description
+# The statement is designed to remove the row that has NA in 75% of the rows.
+# Anyway, this kind of data won't help much.
+incidents <- incidents[, colSums(is.na(incidents)) < nrow(incidents) * 0.75]
+
+# Using unknown for the rest of the NA values
+incidents <- incidents %>%
+  mutate(PERP_AGE_GROUP, is.na(PERP_AGE_GROUP), "Unknown") %>%
+  mutate(PERP_SEX, is.na(PERP_SEX), "Unknown") %>%
+  mutate(PERP_RACE, is.na(PERP_RACE), "Unknown")
+```
+
+## Data Visualizations
+
+We are going to visualize the following three key aspects of the incidents:
+
+- Shootings by borough
+- Time series of shooting incidents
+- Victim age by incident
+
+```{r, echo=FALSE, message=FALSE}
+ggplot(incidents, aes(x = BOROUGH, fill = BOROUGH)) +
+  geom_bar() +
+  labs(
+    title = "Number of Incidents by Borough in NYC",
+    x = "Borough",
+    y = "Number of Incidents"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+From this we can see that **Brooklyn** has the highest number of incidents followed by `Bronx`.
+`Queens` and `Manhattan` has the same amount of incidents.
+
+I would say `Staten Island` has smaller number of incidents compared to the rest.
+
+It is interesting that the rate in `Brooklyn` is super high while the `Staten Island`, only a bridge away has small number of incidents.
+
+```{r, echo=FALSE, message=FALSE}
+# We want to visualize the incidents occurred by the date in time series structure. 
+# To do that, we need to group the incidents by the date and calculate the count first.
+incidents$OCCUR_DATE <- mdy(incidents$OCCUR_DATE)
+
+incidents$month <- floor_date(incidents$OCCUR_DATE, "month")
+
+incident_counts <- incidents %>%
+  group_by(month) %>%
+  summarise(count = n())
+
+ggplot(incident_counts, aes(x = month, y = count)) +
+  geom_line() +
+  theme_minimal() +
+  labs(
+    title = "Time Series - Number of Incidents Over Time",
+    x = "\nDate (Month)",
+    y = "Number of Incidents"
+  ) +
+  scale_x_date(date_labels = "%Y", date_breaks = "year") + 
+  theme(
+    axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
